@@ -84,7 +84,7 @@ The test suite needs a `knit.sh` build and runs with
 [bats](https://bats-core.readthedocs.io/):
 
 ```bash
-KNIT_SH=/path/to/knit.sh bats tests/
+KNIT_SH=/path/to/knit.sh bats tests/test_uv.sh tests/test_setup_uv.sh
 ```
 
 `KNIT_SH` must point at a `knit.sh` that does not itself register a `uv`
