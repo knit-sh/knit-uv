@@ -129,3 +129,87 @@ knit_uv_provision() {
     knit metadata store --key "__uv_ref__"    --value "${resolved}"
     knit metadata store --key "__uv_sha256__" --value "${sha256}"
 }
+
+# @fn knit_uv_install_env()
+#
+# Install verb (knit_env_install): build a uv-managed Python environment from a
+# pyproject.toml manifest. The manifest is placed inside the environment
+# directory and "uv sync" is run with the project rooted there, so uv creates
+# "<env_dir>/.venv" and writes "<env_dir>/uv.lock" (resolving the dependency set
+# and downloading a managed interpreter that satisfies requires-python). uv's
+# managed interpreters and download cache are kept under ".knit/uv" so nothing
+# uv touches escapes the experiment's ".knit".
+#
+# The sync runs directly (its stdout/stderr inherit the caller's terminal) so
+# uv's own progress output is shown. Every step is checked: on failure the
+# function logs a knit_error and returns non-zero (it does NOT knit_fatal) so the
+# setup dispatcher can remove the half-built setup directory and avoid recording
+# it.
+#
+# @param[in] env_dir  Directory in which to build the uv environment.
+# @param[in] manifest Path to the pyproject.toml manifest describing the project.
+# @return 0 if the environment was synced, non-zero otherwise.
+knit_uv_install_env() {
+    local env_dir="$1"
+    local manifest="$2"
+    mkdir -p "${env_dir}"
+    # uv resolves the project from "<env_dir>/pyproject.toml"; the generic layer
+    # materializes the manifest elsewhere under KNIT_SETUP_PREFIX, so copy it in
+    # (skipping a no-op self-copy if it is already there).
+    if [[ "${manifest}" != "${env_dir}/pyproject.toml" ]]; then
+        cp "${manifest}" "${env_dir}/pyproject.toml"
+    fi
+    export UV_PYTHON_INSTALL_DIR="${KNIT_UV_ROOT}/python"
+    export UV_CACHE_DIR="${KNIT_UV_ROOT}/cache"
+    if ! "${KNIT_UV_ROOT}/bin/uv" sync --project "${env_dir}"; then
+        knit_error "uv failed to sync the environment at %s from %s." \
+            "${env_dir}" "${manifest}"
+        return 1
+    fi
+}
+
+# @fn knit_uv_activation()
+#
+# Activate verb (knit_env_activate): print the shell line that re-enters the uv
+# environment at <env_dir> — source the venv's activate script, which sets PATH
+# and VIRTUAL_ENV. Knit both eval-s this in the setup's build shell and appends
+# it to the setup's .activate.sh for dependent jobs.
+#
+# @param[in] env_dir Directory of the built uv environment.
+knit_uv_activation() {
+    local env_dir="$1"
+    printf 'source %q\n' "${env_dir}/.venv/bin/activate"
+}
+
+# @fn knit_uv_specs_to_manifest()
+#
+# Specs verb (knit_env_specs): synthesize a minimal pyproject.toml from a list of
+# PEP 508 requirements, for the knit_with_uv_specs sugar. The project name and
+# version are fixed placeholders and requires-python is a conservative floor; a
+# setup that needs tighter control uses knit_with_uv_env with a real
+# pyproject.toml instead. Printed to stdout; knit feeds it to knit_with_uv_env.
+#
+# @param[in] ... One or more PEP 508 requirement strings (e.g. "numpy>=2").
+knit_uv_specs_to_manifest() {
+    local toml spec
+    toml=$'[project]\nname = "knit-uv-env"\nversion = "0.0.0"\nrequires-python = ">=3.9"\ndependencies = [\n'
+    for spec in "$@"; do
+        toml+="    \"${spec}\","$'\n'
+    done
+    toml+=$']\n'
+    printf '%s' "${toml}"
+}
+
+# Register uv as a knit environment manager. This generates the knit_with_uv_env
+# / knit_with_uv_specs setup directives (and their @with_uv_env / @with_uv_specs
+# shorthands), declares the --uv bootstrap option, and routes provisioning,
+# update-mode re-provisioning, the freeze-on-built rule, and manifest/lockfile
+# provenance through knit's generic environment-manager layer.
+knit_register_env_manager "uv" "uv-managed Python environments."
+knit_env_provision knit_uv_provision --options "uv:string"
+knit_env_install   knit_uv_install_env
+knit_env_activate  knit_uv_activation
+knit_env_specs     knit_uv_specs_to_manifest
+knit_env_manifest  "pyproject.toml"
+knit_env_lockfile  "uv.lock"
+knit_env_done
