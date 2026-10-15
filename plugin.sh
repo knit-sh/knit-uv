@@ -213,3 +213,30 @@ knit_env_specs     knit_uv_specs_to_manifest
 knit_env_manifest  "pyproject.toml"
 knit_env_lockfile  "uv.lock"
 knit_env_done
+
+# @fn knit_uv_exec()
+#
+# Run the knit-provisioned uv, forwarding all arguments verbatim (this is the
+# body of the "knit uv" wrapper). Fatal-with-hint if uv has not been provisioned.
+# Unlike the Spack wrapper, uv is a single static binary with no per-process
+# setup to source, so this just runs "<root>/bin/uv" and returns its status. It
+# deliberately does not "exec" the binary: the wrapper declares a table, and
+# exec-ing would replace the knit process before the invocation is recorded.
+#
+# @param[in] ... Arguments forwarded verbatim to uv (including --help).
+# @return The exit status of uv.
+knit_uv_exec() {
+    if [[ ! -x "${KNIT_UV_ROOT}/bin/uv" ]]; then
+        knit_fatal "uv is not provisioned in %s. Run 'bootstrap --uv' (optionally with a ref) first." \
+            "${KNIT_UV_ROOT}"
+    fi
+    "${KNIT_UV_ROOT}/bin/uv" "$@"
+}
+
+# Register the "knit uv" wrapper: forwards every argument verbatim to the
+# knit-provisioned uv. Declaring a table logs each invocation's full command
+# line (schema id, args) for provenance.
+knit_register_wrapper "uv" "knit_uv_exec" \
+    "Run the knit-provisioned uv, forwarding all arguments verbatim."
+knit_with_table
+knit_done
