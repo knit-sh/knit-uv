@@ -40,9 +40,9 @@ Then bootstrap and build a setup:
 ```bash
 ./experiment.sh bootstrap
 
-knit_register_setup "pyenv" build_pyenv "Build the experiment's Python env."
+@setup "pyenv" build_pyenv "Build the experiment's Python env."
 @with_uv_specs "numpy" "scipy"
-knit_done
+@done
 ```
 
 Pin a specific uv release instead of the latest:
