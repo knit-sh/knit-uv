@@ -151,6 +151,7 @@ _fake_uv() {
 printf 'uv:%s\n' "\$*"
 printf 'PYDIR:%s\n' "\${UV_PYTHON_INSTALL_DIR}"
 printf 'CACHE:%s\n' "\${UV_CACHE_DIR}"
+printf 'PREF:%s\n' "\${UV_PYTHON_PREFERENCE}"
 exit ${code}
 EOF
     chmod +x "${KNIT_UV_ROOT}/bin/uv"
@@ -167,6 +168,8 @@ EOF
     [[ "$output" == *"uv:sync --project ${env_dir}"* ]]
     [[ "$output" == *"PYDIR:${KNIT_UV_ROOT}/python"* ]]
     [[ "$output" == *"CACHE:${KNIT_UV_ROOT}/cache"* ]]
+    # Always builds on a uv-managed interpreter, never the host Python.
+    [[ "$output" == *"PREF:only-managed"* ]]
     [ -f "${env_dir}/pyproject.toml" ]
     [ "$(cat "${env_dir}/pyproject.toml")" = "MANIFEST" ]
 }

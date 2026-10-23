@@ -161,6 +161,14 @@ knit_uv_install_env() {
     fi
     export UV_PYTHON_INSTALL_DIR="${KNIT_UV_ROOT}/python"
     export UV_CACHE_DIR="${KNIT_UV_ROOT}/cache"
+    # Always build on a uv-managed interpreter, never the host Python: uv
+    # downloads a managed CPython that satisfies requires-python and ignores
+    # whatever happens to be installed on the login node. This keeps the
+    # environment self-contained and reproducible across machines (a host with
+    # no Python, an old Python, or a differently-patched one all resolve to the
+    # same managed interpreter) and lets a manifest require a Python newer than
+    # the host provides.
+    export UV_PYTHON_PREFERENCE="only-managed"
     if ! "${KNIT_UV_ROOT}/bin/uv" sync --project "${env_dir}"; then
         knit_error "uv failed to sync the environment at %s from %s." \
             "${env_dir}" "${manifest}"
