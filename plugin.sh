@@ -193,14 +193,19 @@ knit_uv_activation() {
 #
 # Specs verb (knit_env_specs): synthesize a minimal pyproject.toml from a list of
 # PEP 508 requirements, for the knit_with_uv_specs sugar. The project name and
-# version are fixed placeholders and requires-python is a conservative floor; a
-# setup that needs tighter control uses knit_with_uv_env with a real
-# pyproject.toml instead. Printed to stdout; knit feeds it to knit_with_uv_env.
+# version are fixed placeholders. No requires-python is pinned: the synthesized
+# project imposes no Python floor of its own, so the dependencies dictate the
+# interpreter (a dependency needing, e.g., Python >= 3.11 is honored, not
+# rejected because the project claimed to support older versions). The managed
+# CPython is still forced by knit_uv_install_env (UV_PYTHON_PREFERENCE), so
+# dropping the floor does not fall back to a system Python. A setup that needs an
+# explicit floor uses knit_with_uv_env with a real pyproject.toml instead.
+# Printed to stdout; knit feeds it to knit_with_uv_env.
 #
 # @param[in] ... One or more PEP 508 requirement strings (e.g. "numpy>=2").
 knit_uv_specs_to_manifest() {
     local toml spec
-    toml=$'[project]\nname = "knit-uv-env"\nversion = "0.0.0"\nrequires-python = ">=3.9"\ndependencies = [\n'
+    toml=$'[project]\nname = "knit-uv-env"\nversion = "0.0.0"\ndependencies = [\n'
     for spec in "$@"; do
         toml+="    \"${spec}\","$'\n'
     done

@@ -88,7 +88,8 @@ teardown() {
     run knit_uv_specs_to_manifest "numpy>=2" "scipy"
     [ "$status" -eq 0 ]
     [[ "$output" == *"[project]"* ]]
-    [[ "$output" == *'requires-python = ">=3.9"'* ]]
+    # No Python floor is pinned, so the dependencies dictate the interpreter.
+    [[ "$output" != *"requires-python"* ]]
     [[ "$output" == *"dependencies = ["* ]]
     [[ "$output" == *'"numpy>=2",'* ]]
     [[ "$output" == *'"scipy",'* ]]
