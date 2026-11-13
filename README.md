@@ -13,13 +13,29 @@ Importing the plugin gives an experiment:
   directory. A ref is a release tag; empty means the latest release. The resolved
   tag and the downloaded binary's sha256 are recorded in provenance metadata.
 - **`knit_with_uv_env <pyproject.toml>`** / **`@with_uv_env`** — declare that a
-  setup builds a Python environment from a `pyproject.toml` manifest (a path, or
-  fed on stdin). `uv sync` resolves and installs it, writing `uv.lock`.
+  setup builds a Python environment from a complete `pyproject.toml` manifest (a
+  path, or fed on stdin). `uv sync` resolves and installs it, writing `uv.lock`.
 - **`knit_with_uv_specs <spec>...`** / **`@with_uv_specs`** — the same, but from a
   bare list of PEP 508 requirements; the plugin writes the minimal
-  `pyproject.toml` for you.
+  `pyproject.toml` for you. Several calls on one setup **add up** into one list.
+- **`knit_with_uv_specs_from <fn>`** / **`@with_uv_specs_from`** — a function
+  prints newline-separated requirements on stdout when the setup runs, so the list
+  can be chosen *structurally* (a requirement added only under a flag, one per
+  computed item). The function is called with the setup's arguments as `"$@"` and
+  reads parameters with `knit_get_parameter`.
+- **`knit_with_uv_env_from <fn>`** / **`@with_uv_env_from`** — the programmatic
+  twin of `knit_with_uv_env`: a function prints a whole `pyproject.toml` on
+  stdout.
 - **`knit uv <args>...`** — run the knit-provisioned uv, forwarding every
   argument verbatim.
+
+A setup declares **either** a requirement list (any number of `..._specs` /
+`..._specs_from` calls) **or** one complete manifest (a single `..._env` /
+`..._env_from`); the two are mutually exclusive on one setup. Anywhere in a
+requirement or manifest, a **`{{parameter-name}}`** placeholder is replaced, when
+the setup runs, with the value of that setup parameter — so one definition
+installs whatever version the invocation asks for (for example
+`numpy=={{numpy-version}}`).
 
 Provisioning, update-mode re-provisioning, the freeze-on-built rule, the
 `.activate.sh` re-entry lines for dependent jobs, and the manifest/lock
