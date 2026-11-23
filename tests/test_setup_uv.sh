@@ -271,3 +271,51 @@ _write_specs_manifest() {
     grep -qF -- "[pip] [install] [--python] [${env_dir}/.venv/bin/python] [--no-deps]" "${_UV_LOG}"
     grep -qF -- '[cifar-cnn @ git+https://github.com/knit-sh/image-classifier-example.git]' "${_UV_LOG}"
 }
+
+# ---------- validation + help (M4) ----------
+
+@test "layered with a complete manifest is fatal (manifest declared first)" {
+    _reg() {
+        knit_register_setup "pyenv" "_test_setup_fn" "Build the Python env."
+        knit_with_uv_env "pyproject.toml"
+        knit_with_uv_layered
+        knit_done
+    }
+    run _reg
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"layered"* ]]
+    [[ "$output" == *"knit_with_uv_specs"* ]]
+}
+
+@test "layered with a complete manifest is fatal regardless of directive order" {
+    _reg() {
+        knit_register_setup "pyenv" "_test_setup_fn" "Build the Python env."
+        knit_with_uv_layered
+        knit_with_uv_env "pyproject.toml"
+        knit_done
+    }
+    run _reg
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"knit_with_uv_specs"* ]]
+}
+
+@test "layered with specs is accepted (no conflict)" {
+    _reg() {
+        knit_register_setup "pyenv" "_test_setup_fn" "Build the Python env."
+        knit_with_uv_specs "cifar-cnn"
+        knit_with_uv_layered
+        knit_done
+    }
+    run _reg
+    [ "$status" -eq 0 ]
+}
+
+@test "a layered uv setup notes the layered environment in --help" {
+    knit_register_setup "pyenv" "_test_setup_fn" "Build the Python env."
+    knit_with_uv_specs "cifar-cnn"
+    knit_with_uv_layered
+    knit_done
+    local result
+    result=$(_knit_invoke_command "setup" "pyenv" "--help")
+    [[ "${result}" == *"layered"* ]]
+}

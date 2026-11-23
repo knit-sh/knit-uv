@@ -354,10 +354,42 @@ knit_env_done
 # Valid only inside a setup registration (knit_env_record_option is fatal
 # otherwise). It records the "layered" build option through knit's
 # environment-manager options channel; the install verb (knit_uv_install_env)
-# reads it and switches to the venv/pip path. Layered mode pairs with the spec
-# directives (knit_with_uv_specs / knit_with_uv_specs_from).
+# reads it and switches to the venv/pip path. It also notes the layered build in
+# the setup's "--help" and pushes a done-callback that rejects a layered
+# environment declared with a complete manifest.
+#
+# Layered mode pairs with the spec directives (knit_with_uv_specs /
+# knit_with_uv_specs_from), not a full manifest: see
+# knit_uv_reject_layered_manifest.
 knit_with_uv_layered() {
     knit_env_record_option "uv" "layered"
+    knit_add_command_note "The uv environment is layered on the platform-provided Python: the venv inherits the active module's site-packages (knit_with_uv_layered)."
+    knit_push_done_cb knit_uv_reject_layered_manifest "${_KNIT_CURRENT_COMMAND}"
+}
+
+# @fn knit_uv_reject_layered_manifest()
+#
+# Done-callback pushed by knit_with_uv_layered. It runs at the close of the setup
+# registration, when the environment mode is finally known regardless of the
+# order the directives were written, and rejects a layered environment declared
+# with a complete manifest (world A: knit_with_uv_env / knit_with_uv_env_from).
+# Layered mode installs the setup's specs on top of a module-provided interpreter
+# with "uv pip install", so it pairs with the spec directives; a full manifest
+# would be re-resolved and reinstalled by "uv sync", defeating the layer. Fatal
+# in that case, naming the directives and pointing at the spec directives.
+#
+# The mode is read from _KNIT_CMD_<cmd>_envmode_uv, which knit sets to "env" for a
+# manifest and "specs" for a spec list (empty when the setup declares no uv
+# environment, in which case there is nothing to reject).
+#
+# @param[in] cmd Mangled command name of the setup being registered.
+knit_uv_reject_layered_manifest() {
+    local cmd="$1"
+    local mode_var="_KNIT_CMD_${cmd}_envmode_uv"
+    if [[ "${!mode_var:-}" == "env" ]]; then
+        knit_fatal "Setup \"%s\" declares a layered uv environment (knit_with_uv_layered) together with a complete manifest (knit_with_uv_env / knit_with_uv_env_from). Layered mode installs specs on top of the platform interpreter, so declare the packages with knit_with_uv_specs / knit_with_uv_specs_from instead." \
+            "${cmd//__1__/:}"
+    fi
 }
 
 # @fn knit_with_uv_no_deps()
