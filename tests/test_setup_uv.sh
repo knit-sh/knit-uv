@@ -48,6 +48,11 @@ teardown() {
     declare -F @with_uv_specs
 }
 
+@test "the layered directive and its shorthand are defined" {
+    declare -F knit_with_uv_layered
+    declare -F @with_uv_layered
+}
+
 @test "a uv setup declares __uv_manifest__ and __uv_lock__ columns" {
     knit_register_setup "pyenv" "_test_setup_fn" "Build the Python env."
     knit_with_uv_env "pyproject.toml"
@@ -128,4 +133,106 @@ teardown() {
     local -n _out_ref="_KNIT_CMD_${cmd}_output_value"
     [ "$(printf '%s' "${_out_ref[__uv_manifest__]}" | base64 -d | gunzip)" = "MANIFEST" ]
     [ "$(printf '%s' "${_out_ref[__uv_lock__]}" | base64 -d | gunzip)" = "LOCKDATA" ]
+}
+
+# ---------- layered mode (M2) ----------
+
+# Install a fake uv that logs each invocation's argv, one "CALL [a] [b] ..." line
+# per call, so a test can assert the exact uv command without a real uv or
+# network. Each argument is bracketed so specs carrying spaces (a git "pkg @
+# url") or brackets (an extra "pkg[x]") are unambiguous.
+_stub_uv() {
+    cat > "${KNIT_UV_ROOT}/bin/uv" <<EOF
+#!/usr/bin/env bash
+{ printf 'CALL'; for a in "\$@"; do printf ' [%s]' "\${a}"; done; printf '\n'; } >> "${_UV_LOG}"
+EOF
+    chmod +x "${KNIT_UV_ROOT}/bin/uv"
+}
+
+_write_specs_manifest() {
+    # A specs-style pyproject (as knit_uv_specs_to_manifest synthesizes), with a
+    # git spec carrying a space and a spec carrying a bracketed extra.
+    printf '%s\n' \
+        '[project]' \
+        'name = "knit-uv-env"' \
+        'version = "0.0.0"' \
+        'dependencies = [' \
+        '    "cifar-cnn @ git+https://github.com/knit-sh/image-classifier-example.git",' \
+        '    "pillow[avif]>=11",' \
+        ']' > "$1"
+}
+
+@test "knit_with_uv_layered records the layered build option" {
+    knit_register_setup "pyenv" "_test_setup_fn" "Build the Python env."
+    knit_with_uv_specs "cifar-cnn"
+    knit_with_uv_layered
+    knit_done
+    local cmd
+    _knit_command_mangle cmd "setup:pyenv"
+    local -n opts="_KNIT_CMD_${cmd}_envopts_uv"
+    [ "${#opts[@]}" -eq 1 ]
+    [ "${opts[0]}" = "layered" ]
+}
+
+@test "knit_with_uv_layered outside a setup is fatal" {
+    run knit_with_uv_layered
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"setup"* ]]
+}
+
+@test "knit_uv_manifest_dependencies extracts each spec, keeping extras" {
+    local manifest="${_KNIT_TEST_TMPDIR}/pyproject.toml"
+    _write_specs_manifest "${manifest}"
+    run knit_uv_manifest_dependencies "${manifest}"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[0]}" = "cifar-cnn @ git+https://github.com/knit-sh/image-classifier-example.git" ]
+    [ "${lines[1]}" = "pillow[avif]>=11" ]
+}
+
+@test "hermetic install (no options) runs uv sync and no venv" {
+    _UV_LOG="${_KNIT_TEST_TMPDIR}/uv.log"
+    _stub_uv
+    local env_dir="${_KNIT_TEST_TMPDIR}/env"
+    mkdir -p "${env_dir}"
+    local manifest="${_KNIT_TEST_TMPDIR}/pyproject.toml"
+    _write_specs_manifest "${manifest}"
+    run knit_uv_install_env "${env_dir}" "${manifest}"
+    [ "$status" -eq 0 ]
+    grep -qF -- '[sync]' "${_UV_LOG}"
+    grep -qF -- "[--project] [${env_dir}]" "${_UV_LOG}"
+    ! grep -qF -- '[venv]' "${_UV_LOG}"
+}
+
+@test "layered install runs uv venv --system-site-packages then uv pip install of the specs" {
+    _UV_LOG="${_KNIT_TEST_TMPDIR}/uv.log"
+    _stub_uv
+    local env_dir="${_KNIT_TEST_TMPDIR}/env"
+    mkdir -p "${env_dir}"
+    local manifest="${_KNIT_TEST_TMPDIR}/pyproject.toml"
+    _write_specs_manifest "${manifest}"
+    run knit_uv_install_env "${env_dir}" "${manifest}" layered
+    [ "$status" -eq 0 ]
+    # The venv is created on the ambient interpreter with inherited site-packages.
+    grep -qF -- '[venv] [--system-site-packages] [--python-preference] [only-system]' "${_UV_LOG}"
+    grep -qF -- "[${env_dir}/.venv]" "${_UV_LOG}"
+    # The specs are installed on top (no --no-deps yet; that is M3).
+    grep -qF -- "[pip] [install] [--python] [${env_dir}/.venv/bin/python]" "${_UV_LOG}"
+    grep -qF -- '[cifar-cnn @ git+https://github.com/knit-sh/image-classifier-example.git]' "${_UV_LOG}"
+    grep -qF -- '[pillow[avif]>=11]' "${_UV_LOG}"
+    ! grep -qF -- '[sync]' "${_UV_LOG}"
+    ! grep -qF -- '[--no-deps]' "${_UV_LOG}"
+}
+
+@test "layered install fails when the manifest declares no dependencies" {
+    _UV_LOG="${_KNIT_TEST_TMPDIR}/uv.log"
+    _stub_uv
+    local env_dir="${_KNIT_TEST_TMPDIR}/env"
+    mkdir -p "${env_dir}"
+    local manifest="${_KNIT_TEST_TMPDIR}/pyproject.toml"
+    printf '%s\n' '[project]' 'name = "x"' 'version = "0"' 'dependencies = [' ']' \
+        > "${manifest}"
+    run knit_uv_install_env "${env_dir}" "${manifest}" layered
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"no dependencies"* ]]
 }
