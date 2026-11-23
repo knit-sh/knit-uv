@@ -216,7 +216,7 @@ _write_specs_manifest() {
     # The venv is created on the ambient interpreter with inherited site-packages.
     grep -qF -- '[venv] [--system-site-packages] [--python-preference] [only-system]' "${_UV_LOG}"
     grep -qF -- "[${env_dir}/.venv]" "${_UV_LOG}"
-    # The specs are installed on top (no --no-deps yet; that is M3).
+    # The specs are installed on top; --no-deps is absent when not recorded.
     grep -qF -- "[pip] [install] [--python] [${env_dir}/.venv/bin/python]" "${_UV_LOG}"
     grep -qF -- '[cifar-cnn @ git+https://github.com/knit-sh/image-classifier-example.git]' "${_UV_LOG}"
     grep -qF -- '[pillow[avif]>=11]' "${_UV_LOG}"
@@ -235,4 +235,39 @@ _write_specs_manifest() {
     run knit_uv_install_env "${env_dir}" "${manifest}" layered
     [ "$status" -ne 0 ]
     [[ "$output" == *"no dependencies"* ]]
+}
+
+# ---------- --no-deps (M3) ----------
+
+@test "the no-deps directive and its shorthand are defined" {
+    declare -F knit_with_uv_no_deps
+    declare -F @with_uv_no_deps
+}
+
+@test "knit_with_uv_no_deps records the no-deps build option" {
+    knit_register_setup "pyenv" "_test_setup_fn" "Build the Python env."
+    knit_with_uv_specs "cifar-cnn"
+    knit_with_uv_layered
+    knit_with_uv_no_deps
+    knit_done
+    local cmd
+    _knit_command_mangle cmd "setup:pyenv"
+    local -n opts="_KNIT_CMD_${cmd}_envopts_uv"
+    [ "${#opts[@]}" -eq 2 ]
+    [ "${opts[0]}" = "layered" ]
+    [ "${opts[1]}" = "no-deps" ]
+}
+
+@test "layered install with the no-deps option passes --no-deps to uv pip install" {
+    _UV_LOG="${_KNIT_TEST_TMPDIR}/uv.log"
+    _stub_uv
+    local env_dir="${_KNIT_TEST_TMPDIR}/env"
+    mkdir -p "${env_dir}"
+    local manifest="${_KNIT_TEST_TMPDIR}/pyproject.toml"
+    _write_specs_manifest "${manifest}"
+    run knit_uv_install_env "${env_dir}" "${manifest}" layered no-deps
+    [ "$status" -eq 0 ]
+    # --no-deps sits between the --python target and the first spec.
+    grep -qF -- "[pip] [install] [--python] [${env_dir}/.venv/bin/python] [--no-deps]" "${_UV_LOG}"
+    grep -qF -- '[cifar-cnn @ git+https://github.com/knit-sh/image-classifier-example.git]' "${_UV_LOG}"
 }

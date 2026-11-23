@@ -190,11 +190,12 @@ knit_uv_install_env() {
     local env_dir="$1"
     local manifest="$2"
     shift 2
-    local layered="false"
+    local layered="false" no_deps="false"
     local opt
     for opt in "$@"; do
         case "${opt}" in
             layered) layered="true" ;;
+            no-deps) no_deps="true" ;;
             *) knit_warning "knit-uv: ignoring unknown build option \"%s\"." "${opt}" ;;
         esac
     done
@@ -211,7 +212,7 @@ knit_uv_install_env() {
     export UV_CACHE_DIR="${KNIT_UV_ROOT}/cache"
 
     if [[ "${layered}" == "true" ]]; then
-        knit_uv_install_env_layered "${env_dir}"
+        knit_uv_install_env_layered "${env_dir}" "${no_deps}"
     else
         knit_uv_install_env_hermetic "${env_dir}" "${manifest}"
     fi
@@ -252,12 +253,16 @@ knit_uv_install_env_hermetic() {
 # example, Aurora's XPU-built torch — is the one on PATH and is inherited into the
 # venv's site-packages. The specs come from the manifest's [project].dependencies
 # (layered mode pairs with the spec directives, so the manifest is the specs
-# list).
+# list). With no_deps "true" the specs are installed with --no-deps, so a package
+# a module already provides is not overwritten by a public-index build of the
+# same name pulled in as a transitive dependency.
 #
 # @param[in] env_dir The uv environment directory (holds pyproject.toml).
+# @param[in] no_deps "true" to install the specs with --no-deps, "false" otherwise.
 # @return 0 if the venv was created and the specs installed, non-zero otherwise.
 knit_uv_install_env_layered() {
     local env_dir="$1"
+    local no_deps="$2"
     local uv="${KNIT_UV_ROOT}/bin/uv"
     if ! "${uv}" venv --system-site-packages --python-preference only-system \
             "${env_dir}/.venv"; then
@@ -274,7 +279,9 @@ knit_uv_install_env_layered() {
             "${env_dir}"
         return 1
     fi
-    if ! "${uv}" pip install --python "${env_dir}/.venv/bin/python" "${specs[@]}"; then
+    local pip_args=(pip install --python "${env_dir}/.venv/bin/python")
+    [[ "${no_deps}" == "true" ]] && pip_args+=(--no-deps)
+    if ! "${uv}" "${pip_args[@]}" "${specs[@]}"; then
         knit_error "uv failed to install the layered specs into %s/.venv." "${env_dir}"
         return 1
     fi
@@ -353,10 +360,29 @@ knit_with_uv_layered() {
     knit_env_record_option "uv" "layered"
 }
 
-# Give knit_with_uv_layered its "@with_uv_layered" shorthand. The plugin loads
-# after src/shorthand.sh, so the shorthand seam already exists; register now
-# (the target function is defined just above, as knit_register_shorthand requires).
+# @fn knit_with_uv_no_deps()
+#
+# Setup directive: install this setup's specs with --no-deps, so uv installs each
+# spec without its transitive dependencies. Normally paired with
+# knit_with_uv_layered: when layering on a module that already provides a
+# framework (for example Aurora's torch), --no-deps keeps a spec from pulling a
+# public-index build of that same package over the module's one. It is accepted
+# without knit_with_uv_layered too (a hermetic install then ignores it, since
+# "uv sync" resolves from the manifest), but that combination is unusual.
+#
+# Valid only inside a setup registration (knit_env_record_option is fatal
+# otherwise). It records the "no-deps" build option through knit's
+# environment-manager options channel; the install verb reads it and adds
+# --no-deps to the layered "uv pip install".
+knit_with_uv_no_deps() {
+    knit_env_record_option "uv" "no-deps"
+}
+
+# Give the layered-mode directives their "@" shorthands. The plugin loads after
+# src/shorthand.sh, so the shorthand seam already exists; register now (each
+# target function is defined just above, as knit_register_shorthand requires).
 knit_register_shorthand "with_uv_layered" "knit_with_uv_layered"
+knit_register_shorthand "with_uv_no_deps" "knit_with_uv_no_deps"
 
 # @fn knit_uv_exec()
 #
