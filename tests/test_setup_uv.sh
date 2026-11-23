@@ -145,6 +145,10 @@ _stub_uv() {
     cat > "${KNIT_UV_ROOT}/bin/uv" <<EOF
 #!/usr/bin/env bash
 { printf 'CALL'; for a in "\$@"; do printf ' [%s]' "\${a}"; done; printf '\n'; } >> "${_UV_LOG}"
+# "uv pip freeze" prints a canned snapshot so the layered lock can be captured.
+if [[ "\$1" == "pip" && "\$2" == "freeze" ]]; then
+    printf 'cifar-cnn==0.1.0\ntorch==2.13.0a0\n'
+fi
 EOF
     chmod +x "${KNIT_UV_ROOT}/bin/uv"
 }
@@ -318,4 +322,75 @@ _write_specs_manifest() {
     local result
     result=$(_knit_invoke_command "setup" "pyenv" "--help")
     [[ "${result}" == *"layered"* ]]
+}
+
+# ---------- layered provenance (M5) ----------
+
+@test "layered install writes a uv.lock freeze snapshot marked as layered" {
+    _UV_LOG="${_KNIT_TEST_TMPDIR}/uv.log"
+    _stub_uv
+    local env_dir="${_KNIT_TEST_TMPDIR}/env"
+    mkdir -p "${env_dir}"
+    local manifest="${_KNIT_TEST_TMPDIR}/pyproject.toml"
+    _write_specs_manifest "${manifest}"
+    run knit_uv_install_env "${env_dir}" "${manifest}" layered
+    [ "$status" -eq 0 ]
+    # uv was asked to freeze the built venv.
+    grep -qF -- "[pip] [freeze] [--python] [${env_dir}/.venv/bin/python]" "${_UV_LOG}"
+    # The freeze lands at the lockfile path the generic after-cb reads.
+    [ -f "${env_dir}/uv.lock" ]
+    head -1 "${env_dir}/uv.lock" | grep -qF "layered"
+    grep -qF "cifar-cnn==0.1.0" "${env_dir}/uv.lock"
+    grep -qF "torch==2.13.0a0" "${env_dir}/uv.lock"
+}
+
+@test "a freeze failure leaves no lockfile but still succeeds (best-effort)" {
+    _UV_LOG="${_KNIT_TEST_TMPDIR}/uv.log"
+    # A uv whose "pip freeze" fails; venv/install still succeed.
+    cat > "${KNIT_UV_ROOT}/bin/uv" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "pip" && "\$2" == "freeze" ]]; then exit 1; fi
+exit 0
+EOF
+    chmod +x "${KNIT_UV_ROOT}/bin/uv"
+    local env_dir="${_KNIT_TEST_TMPDIR}/env"
+    mkdir -p "${env_dir}"
+    local manifest="${_KNIT_TEST_TMPDIR}/pyproject.toml"
+    _write_specs_manifest "${manifest}"
+    run knit_uv_install_env "${env_dir}" "${manifest}" layered
+    [ "$status" -eq 0 ]
+    [ ! -f "${env_dir}/uv.lock" ]
+}
+
+@test "a layered build populates both manifest and lock provenance outputs" {
+    command -v gzip >/dev/null 2>&1 || skip "gzip not available"
+    command -v base64 >/dev/null 2>&1 || skip "base64 not available"
+    _UV_LOG="${_KNIT_TEST_TMPDIR}/uv.log"
+    _stub_uv
+    knit_register_setup "pyenv" "_test_setup_fn" "Build the Python env."
+    knit_with_uv_specs "cifar-cnn"
+    knit_with_uv_layered
+    knit_done
+    local cmd
+    _knit_command_mangle cmd "setup:pyenv"
+    declare -gA "_KNIT_CMD_${cmd}_output_value=()"
+    _KNIT_EXECUTING_COMMAND=("${cmd}")
+
+    export KNIT_SETUP_PREFIX="${_KNIT_TEST_TMPDIR}/prefix"
+    local env_dir="${KNIT_SETUP_PREFIX}/uv-env"
+    mkdir -p "${env_dir}"
+    local manifest="${KNIT_SETUP_PREFIX}/pyproject.toml"
+    _write_specs_manifest "${manifest}"
+    touch "${KNIT_SETUP_PREFIX}/.activate.sh"
+
+    # Build the layered env (writes <env_dir>/pyproject.toml + uv.lock freeze),
+    # then run the generic after-cb that captures both as provenance outputs.
+    run knit_uv_install_env "${env_dir}" "${manifest}" layered
+    [ "$status" -eq 0 ]
+    _knit_env_setup_after_cb "uv"
+
+    local -n _out_ref="_KNIT_CMD_${cmd}_output_value"
+    [ -n "${_out_ref[__uv_manifest__]}" ]
+    [ -n "${_out_ref[__uv_lock__]}" ]
+    [[ "$(printf '%s' "${_out_ref[__uv_lock__]}" | base64 -d | gunzip)" == *"cifar-cnn==0.1.0"* ]]
 }

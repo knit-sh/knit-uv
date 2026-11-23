@@ -257,6 +257,12 @@ knit_uv_install_env_hermetic() {
 # a module already provides is not overwritten by a public-index build of the
 # same name pulled in as a transitive dependency.
 #
+# Layered mode runs no "uv sync", so there is no uv.lock. For provenance it
+# instead writes a "uv pip freeze" of the built venv to the lockfile path the
+# generic after-callback captures as __uv_lock__ (see knit_uv_freeze_lock). That
+# is best-effort: a freeze failure warns but does not discard a working
+# environment.
+#
 # @param[in] env_dir The uv environment directory (holds pyproject.toml).
 # @param[in] no_deps "true" to install the specs with --no-deps, "false" otherwise.
 # @return 0 if the venv was created and the specs installed, non-zero otherwise.
@@ -284,6 +290,35 @@ knit_uv_install_env_layered() {
     if ! "${uv}" "${pip_args[@]}" "${specs[@]}"; then
         knit_error "uv failed to install the layered specs into %s/.venv." "${env_dir}"
         return 1
+    fi
+    knit_uv_freeze_lock "${env_dir}"
+}
+
+# @fn knit_uv_freeze_lock()
+#
+# Write a "uv pip freeze" of the layered venv to "<env_dir>/uv.lock", the
+# lockfile path the generic after-callback captures as the __uv_lock__ provenance
+# output. Layered mode has no real uv.lock (it runs no "uv sync"); the freeze is
+# its reproducibility snapshot — the concrete set of versions that landed in the
+# venv on top of the module's interpreter. A leading comment marks the file as a
+# layered freeze so it is not mistaken for a uv sync lock (it is requirements
+# format, not uv.lock TOML).
+#
+# Best-effort: if the freeze fails the environment is still usable, so this warns
+# and leaves no lockfile (the __uv_lock__ output stays empty) rather than failing
+# the setup.
+#
+# @param[in] env_dir The layered uv environment directory (holds .venv).
+knit_uv_freeze_lock() {
+    local env_dir="$1"
+    local freeze
+    if freeze="$("${KNIT_UV_ROOT}/bin/uv" pip freeze \
+            --python "${env_dir}/.venv/bin/python" 2>/dev/null)"; then
+        printf '# knit-uv layered environment: uv pip freeze snapshot (not a uv sync lock).\n%s\n' \
+            "${freeze}" > "${env_dir}/uv.lock"
+    else
+        knit_warning "Could not freeze the layered uv environment at %s/.venv; __uv_lock__ provenance will be empty." \
+            "${env_dir}"
     fi
 }
 
