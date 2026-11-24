@@ -30,9 +30,9 @@ teardown() {
     curl() { printf '%s' '{"tag_name":"0.5.0"}'; }
     knit_jq() { jq "$@"; }
 
-    run knit_uv_latest_release
-    [ "$status" -eq 0 ]
-    [ "$output" = "0.5.0" ]
+    local tag=""
+    knit_uv_latest_release tag
+    [ "$tag" = "0.5.0" ]
 }
 
 @test "latest release is fatal when the API returns no release" {
@@ -40,7 +40,8 @@ teardown() {
     curl() { printf '%s' '{}'; }
     knit_jq() { jq "$@"; }
 
-    run knit_uv_latest_release
+    local tag=""
+    run knit_uv_latest_release tag
     [ "$status" -ne 0 ]
     [[ "$output" == *"Could not resolve"* ]]
 }
@@ -121,7 +122,7 @@ _stub_provisioning() {
 
 @test "provision resolves the latest release when the ref is empty" {
     _stub_provisioning
-    knit_uv_latest_release() { printf '0.9.9'; }
+    knit_uv_latest_release() { local -n __out=$1; __out='0.9.9'; }
 
     knit_uv_provision ""
 
@@ -131,7 +132,7 @@ _stub_provisioning() {
 
 @test "provision uses an explicit ref and skips latest resolution" {
     _stub_provisioning
-    knit_uv_latest_release() { printf 'SHOULD_NOT_BE_CALLED'; }
+    knit_uv_latest_release() { local -n __out=$1; __out='SHOULD_NOT_BE_CALLED'; }
 
     knit_uv_provision "0.4.0"
 

@@ -29,19 +29,28 @@ KNIT_UV_ROOT="$(knit_prefix)/uv"
 
 # @fn knit_uv_latest_release()
 #
-# Resolve the latest release tag of uv through the GitHub API. Used when the user
-# did not pin a ref: the plugin provisions the newest published release.
+# Resolve the latest release tag of uv through the GitHub API, returning it by
+# nameref. Used when the user did not pin a ref: the plugin provisions the newest
+# published release. The result is returned by nameref rather than on stdout so
+# that an unresolved release stays fatal in the caller's shell: a value captured
+# with "$(...)" would run this in a subshell, where knit_fatal exits only that
+# subshell and the caller would carry on with an empty tag.
 #
-# @return Prints the newest release tag; fatal if none can be resolved.
+# @param[out] tag_out Nameref that receives the newest release tag.
+# @return Sets the output; fatal if no release can be resolved.
 knit_uv_latest_release() {
+    local -n __knit_ret=$1
     local url="https://api.github.com/repos/astral-sh/uv/releases/latest"
-    local tag
-    tag="$(knit_github_api "${url}" | knit_jq -r '.tag_name // empty')"
-    if [[ -z "${tag}" ]]; then
+    # __-prefixed: a caller may name its output variable "tag", which the nameref
+    # aliases; a plain local of that name would shadow the nameref
+    # (nameref-shadow-collision).
+    local __knit_tag
+    __knit_tag="$(knit_github_api "${url}" | knit_jq -r '.tag_name // empty')"
+    if [[ -z "${__knit_tag}" ]]; then
         knit_fatal "Could not resolve the latest uv release from ${url}." \
             "If this is a rate-limited environment, set GITHUB_TOKEN."
     fi
-    printf '%s' "${tag}"
+    __knit_ret="${__knit_tag}"
 }
 
 # @fn knit_uv_asset_name()
@@ -106,7 +115,7 @@ knit_uv_provision() {
     local resolved="${requested}"
     if [[ -z "${resolved}" ]]; then
         knit_trace "Resolving latest uv release..."
-        resolved="$(knit_uv_latest_release)"
+        knit_uv_latest_release resolved
     fi
 
     local asset
