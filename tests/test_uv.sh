@@ -214,3 +214,14 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"uv:--help"* ]]
 }
+
+@test "uv_exec targets the hermetic cache and python dir under .knit/uv" {
+    _fake_uv 0
+    run knit_uv_exec cache dir
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PYDIR:${KNIT_UV_ROOT}/python"* ]]
+    [[ "$output" == *"CACHE:${KNIT_UV_ROOT}/cache"* ]]
+    # The wrapper does not force an interpreter preference (mode-specific).
+    [[ "$output" == *"PREF:"* ]]
+    [[ "$output" != *"PREF:only-managed"* ]]
+}

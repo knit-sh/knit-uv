@@ -27,7 +27,11 @@ Importing the plugin gives an experiment:
   twin of `knit_with_uv_env`: a function prints a whole `pyproject.toml` on
   stdout.
 - **`knit uv <args>...`** — run the knit-provisioned uv, forwarding every
-  argument verbatim.
+  argument verbatim. The wrapper targets the same hermetic download cache and
+  managed interpreters under `.knit/uv` as provisioning and install, so
+  `knit uv cache clean <pkg>`, `knit uv cache dir`, or `knit uv python list`
+  act on the experiment-private cache/pythons, not the user's default
+  `~/.cache/uv` and system interpreters.
 
 A setup declares **either** a requirement list (any number of `..._specs` /
 `..._specs_from` calls) **or** one complete manifest (a single `..._env` /

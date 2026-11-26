@@ -168,6 +168,27 @@ knit_uv_manifest_dependencies() {
     ' "${manifest}"
 }
 
+# @fn knit_uv_env()
+#
+# Export the environment that pins uv's managed interpreters and download cache
+# under ".knit/uv", so nothing uv touches escapes the experiment's ".knit":
+#
+#   * UV_PYTHON_INSTALL_DIR -> "<root>/python" (managed CPython downloads)
+#   * UV_CACHE_DIR          -> "<root>/cache"  (wheel/source download cache)
+#
+# Applied by both the install path (knit_uv_install_env) and the "knit uv"
+# wrapper (knit_uv_exec), so a wrapper call such as "knit uv cache clean <pkg>"
+# or "knit uv python list" targets the same hermetic cache/pythons as
+# provisioning and install, not the user's default "~/.cache/uv" and system
+# interpreters. The interpreter *preference* is deliberately left unset here: it
+# is mode-specific (hermetic forces only-managed, layered passes
+# --python-preference only-system) and must not be forced on the general-purpose
+# wrapper.
+knit_uv_env() {
+    export UV_PYTHON_INSTALL_DIR="${KNIT_UV_ROOT}/python"
+    export UV_CACHE_DIR="${KNIT_UV_ROOT}/cache"
+}
+
 # @fn knit_uv_install_env()
 #
 # Install verb (knit_env_install): build the setup's uv environment from a
@@ -217,8 +238,7 @@ knit_uv_install_env() {
     if [[ "${manifest}" != "${env_dir}/pyproject.toml" ]]; then
         cp "${manifest}" "${env_dir}/pyproject.toml"
     fi
-    export UV_PYTHON_INSTALL_DIR="${KNIT_UV_ROOT}/python"
-    export UV_CACHE_DIR="${KNIT_UV_ROOT}/cache"
+    knit_uv_env
 
     if [[ "${layered}" == "true" ]]; then
         knit_uv_install_env_layered "${env_dir}" "${no_deps}"
@@ -466,8 +486,12 @@ knit_register_shorthand "with_uv_no_deps" "knit_with_uv_no_deps"
 # body of the "knit uv" wrapper). Fatal-with-hint if uv has not been provisioned.
 # Unlike the Spack wrapper, uv is a single static binary with no per-process
 # setup to source, so this just runs "<root>/bin/uv" and returns its status. It
-# deliberately does not "exec" the binary: the wrapper declares a table, and
-# exec-ing would replace the knit process before the invocation is recorded.
+# first applies knit_uv_env so the wrapper targets the same hermetic cache and
+# managed interpreters under ".knit/uv" as the install path — a "knit uv cache
+# clean" or "knit uv python list" acts on the experiment-private cache/pythons,
+# not the user's default "~/.cache/uv" and system interpreters. It deliberately
+# does not "exec" the binary: the wrapper declares a table, and exec-ing would
+# replace the knit process before the invocation is recorded.
 #
 # @param[in] ... Arguments forwarded verbatim to uv (including --help).
 # @return The exit status of uv.
@@ -476,6 +500,7 @@ knit_uv_exec() {
         knit_fatal "uv is not provisioned in %s. Run 'bootstrap --uv' (optionally with a ref) first." \
             "${KNIT_UV_ROOT}"
     fi
+    knit_uv_env
     "${KNIT_UV_ROOT}/bin/uv" "$@"
 }
 
